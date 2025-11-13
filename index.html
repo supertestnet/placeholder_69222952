@@ -139,10 +139,11 @@
                 <p><button class="users_yes_info_btn">Your "Yes" info</button></p>
                 <div class="users_yes_info hidden">
                     <p>Your deposits so far: <span class="yes_balance">0</span> sats</p>
+                    <p>Amount lost to mining fees: <span class="lost_to_fees">0</span> sats</p>
                     <p>How many sats you can withdraw (i.e. amount not in active contracts): <span class="withdrawable_balance">0</span> sats</p>
-                    <p>Amount of sats in active contracts (and thus not immediately withdrawable): <span class="unwithdrawable_balance">0</span> sats</p>
-                    <p>Balance you expect on resolution day if your side wins: <span class="expected_balance">0</span> sats</p>
-                    <p>Amount you might earn if you try to sell your position right now: <span class="earnings_possible_now">0</span> sats</p>
+                    <p>Amount of sats in active contracts (and thus not withdrawable): <span class="unwithdrawable_balance">0</span> sats</p>
+                    <p>Balance you might get on resolution day if all your contracts get purchased and your side wins: <span class="expected_balance">0</span> sats</p>
+                    <p>Amount you might earn right now if you list your position for sale and someone buys it: <span class="earnings_possible_now">0</span> sats</p>
                 </div>
             </div>
             <div class="yes_or_no_box no_box">
@@ -153,10 +154,11 @@
                 <p><button class="users_no_info_btn">Your "No" info</button></p>
                 <div class="users_no_info hidden">
                     <p>Your deposits so far: <span class="no_balance">0</span> sats</p>
+                    <p>Amount lost to mining fees: <span class="lost_to_fees">0</span> sats</p>
                     <p>How many sats you can withdraw (i.e. amount not in active contracts): <span class="withdrawable_balance">0</span> sats</p>
-                    <p>Amount of sats in active contracts (and thus not immediately withdrawable): <span class="unwithdrawable_balance">0</span> sats</p>
-                    <p>Balance you expect on resolution day if your side wins: <span class="expected_balance">0</span> sats</p>
-                    <p>Amount you might earn if you try to sell your position right now: <span class="earnings_possible_now">0</span> sats</p>
+                    <p>Amount of sats in active contracts (and thus not withdrawable): <span class="unwithdrawable_balance">0</span> sats</p>
+                    <p>Balance you might get on resolution day if all your contracts get purchased and your side wins: <span class="expected_balance">0</span> sats</p>
+                    <p>Amount you might earn right now if you list your position for sale and someone buys it: <span class="earnings_possible_now">0</span> sats</p>
                 </div>
             </div>
         </div>
@@ -494,7 +496,7 @@
                         [ "OP_RETURN", i ],
                     ];
                     var [ yes_contract ] = aggeus_interface.getAddressData( yes_scripts, 0 );
-                    coordinator_to_user_contracts.push( [ yes_contract, yes_scripts, "user_bets_yes" ] );
+                    coordinator_to_user_contracts.push( [ yes_contract, yes_scripts, "user_bets_yes", ( 60 * 100 ) - ( 2 * 100 ) ] );
                 }
                 var i; for ( i=0; i<vins_to_skip; i++ ) {
                     if ( !no_psbt_minus_fees.vout.length ) continue;
@@ -503,7 +505,7 @@
                         [ "OP_RETURN", i ],
                     ];
                     var [ no_contract ] = aggeus_interface.getAddressData( no_scripts, 0 );
-                    coordinator_to_user_contracts.push( [ no_contract, no_scripts, "user_bets_no" ] );
+                    coordinator_to_user_contracts.push( [ no_contract, no_scripts, "user_bets_no", ( 40 * 100 ) - ( 2 * 100 ) ] );
                 }
 
                 //Define the number of outputs controlled by the user; this variable will be used later, but it seems wise to define it here, before more outputs get added which the coordinator must fund, otherwise it's harder to calculate later
@@ -557,7 +559,7 @@
                         [ "OP_RETURN", i ],
                     ];
                     var [ yes_contract ] = aggeus_interface.getAddressData( yes_scripts, 0 );
-                    yes_contracts.push( [ yes_contract, yes_scripts, "user_bets_yes" ] );
+                    yes_contracts.push( [ yes_contract, yes_scripts, "user_bets_yes", ( 10_000 - ( ( 60 * 100 ) - ( 2 * 100 ) ) ) ] );
                 }
                 var i; for ( i=0; i<num_of_user_controlled_outputs_except_change; i++ ) {
                     if ( !no_psbt_minus_fees.vout.length ) continue;
@@ -566,7 +568,7 @@
                         [ "OP_RETURN", i ],
                     ];
                     var [ no_contract ] = aggeus_interface.getAddressData( no_scripts, 0 );
-                    no_contracts.push( [ no_contract, no_scripts, "user_bets_no" ] );
+                    no_contracts.push( [ no_contract, no_scripts, "user_bets_no", ( 10_000 - ( ( 40 * 100 ) - ( 2 * 100 ) ) ) ] );
                 }
 
                 //For each of the user's outputs created by the above psbts, sign a tx that lets the coordinator turn them into offers
@@ -678,19 +680,55 @@
                     if ( offers_already_sent.includes( offer_id ) ) return;
                     offers_to_send[ offer_id ] = offers[ offer_id ];
                 })
-                var reply = await c_talker( aggeus_interface.coordinators_pubkey, aggeus_interface.coordinators_relays[ 0 ], "create_offers", offers_to_send );
-                if ( reply !== "success" ) return alert( `error: ${reply}` );
-                else console.log( reply );
-                console.log( `now I am waiting for money to enter these addresses:` );
-                var yes_addresses = [];
-                yes_contracts.forEach( ct => yes_addresses.push( ct[ 0 ] ) );
-                var no_addresses = [];
-                no_contracts.forEach( ct => no_addresses.push( ct[ 0 ] ) );
-                var coordinator_to_user_addresses = [];
-                coordinator_to_user_contracts.forEach( ct => coordinator_to_user_addresses.push( ct[ 0 ] ) );
-                console.log( [ ...yes_addresses, ...no_addresses, ...coordinator_to_user_addresses ] );
+                c_talker( aggeus_interface.coordinators_pubkey, aggeus_interface.coordinators_relays[ 0 ], "create_offers", offers_to_send );
+                var sum_of_inputs = 0;
+                var sum_of_outputs = 0;
+                tx_to_work_with.vin.forEach( vin => sum_of_inputs = sum_of_inputs + Number( vin.prevout.value ) );
+                tx_to_work_with.vout.forEach( vout => sum_of_outputs = sum_of_outputs + Number( vout.value ) );
+                var lost_to_fees = sum_of_inputs - sum_of_outputs;
+                if ( lost_to_fees < 0 ) lost_to_fees = 0;
                 $( '.yes_balance' ).innerText = yes_balance;
                 $( '.no_balance' ).innerText = no_balance;
+                $$( '.lost_to_fees' ).forEach( item => item.innerText = lost_to_fees );
+                $$( '.withdrawable_balance' ).forEach( item => item.innerText = yes_balance + no_balance - lost_to_fees );
+                console.log( `now I am waiting for money to enter these addresses:` );
+                var yes_addresses = [];
+                yes_contracts.forEach( ct => yes_addresses.push( [ ct[ 0 ], ct[ 3 ] ] ) );
+                var no_addresses = [];
+                no_contracts.forEach( ct => no_addresses.push( [ ct[ 0 ], ct[ 3 ] ] ) );
+                var coordinator_to_user_addresses = [];
+                coordinator_to_user_contracts.forEach( ct => coordinator_to_user_addresses.push( [ ct[ 0 ], ct[ 3 ] ] ) );
+                console.log( [ ...yes_addresses, ...no_addresses, ...coordinator_to_user_addresses ] );
+                $$( '.expected_balance' ).forEach( item => item.innerText = [ ...yes_addresses, ...no_addresses, ...coordinator_to_user_addresses ].length * 10_000 );
+                var listenForCoins = async ( network, addresses = [] ) => {
+                    console.log( `waiting for money to enter smart contracts...` );
+                    await super_nostr.waitSomeSeconds( 1 );
+                    if ( !network ) network = prompt( "enter network, either in the form pubkey,wss://relay.example.com or a url such as https://mempool.guide/api" );
+                    if ( network.includes( "," ) ) network = network.split( "," );
+                    var results = {}
+                    var recheck = true;
+                    var i; for ( i=0; i<addresses.length; i++ ) {
+                        var address = addresses[ i ][ 0 ];
+                        var utxos = await mempool_client( network, "utxos", address );
+                        if ( utxos.length ) results[ address ] = addresses[ i ][ 1 ];
+                        if ( utxos.length && recheck && i ) {
+                            recheck = false;
+                            i=-1;
+                        }
+                    }
+                    if ( !Object.keys( results ).length ) return listenForCoins( network, addresses );
+                    return results;
+                }
+                var results = await listenForCoins( network, [ ...yes_addresses, ...no_addresses, ...coordinator_to_user_addresses ] );
+                var sum_of_immovable_funds = 0;
+                var active_contracts = [];
+                Object.keys( results ).forEach( result => {
+                    sum_of_immovable_funds = sum_of_immovable_funds + results[ result ];
+                    active_contracts.push( result );
+                });
+                console.log( 'active_contracts:', active_contracts );
+                $$( '.unwithdrawable_balance' ).forEach( item => item.innerText = sum_of_immovable_funds );
+                $$( '.withdrawable_balance' ).forEach( item => item.innerText = Number( item.innerText ) -sum_of_immovable_funds );
             }
             var displayMarkets = async markets => {
                 markets.forEach( shareable_data => {
