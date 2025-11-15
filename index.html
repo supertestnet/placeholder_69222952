@@ -559,11 +559,17 @@
                 var i; for ( i=vins_to_skip; i<yes_psbt_minus_fees.vin.length; i++ ) {
                     var sig = tapscript.Signer.taproot.sign( yes_privkey, yes_psbt_minus_fees, i ).hex;
                     if ( vins_to_skip ) var sig = tapscript.Signer.taproot.sign( yes_privkey, yes_psbt_minus_fees, i, {sigflag: 1 | 128} ).hex;
+                    var sighash = tapscript.Signer.taproot.hash( yes_psbt_minus_fees, i, {sigflag: 1 | 128 }).hex;
+                    yes_psbt_minus_fees.vin.forEach( ( vin, index ) => yes_psbt_minus_fees.vin[ index ].prevout.value = Number( vin.prevout.value ) );
+                    yes_psbt_minus_fees.vout.forEach( ( vout, index ) => yes_psbt_minus_fees.vout[ index ].value = Number( vout.value ) );
                     yes_psbt_minus_fees.vin[ i ].witness = [ sig ];
                 }
                 var i; for ( i=vins_to_skip; i<no_psbt_minus_fees.vin.length; i++ ) {
                     var sig = tapscript.Signer.taproot.sign( no_privkey, no_psbt_minus_fees, i ).hex;
                     if ( vins_to_skip ) var sig = tapscript.Signer.taproot.sign( no_privkey, no_psbt_minus_fees, i, {sigflag: 1 | 128} ).hex;
+                    var sighash = tapscript.Signer.taproot.hash( no_psbt_minus_fees, i, {sigflag: 1 | 128 }).hex;
+                    no_psbt_minus_fees.vin.forEach( ( vin, index ) => no_psbt_minus_fees.vin[ index ].prevout.value = Number( vin.prevout.value ) );
+                    no_psbt_minus_fees.vout.forEach( ( vout, index ) => no_psbt_minus_fees.vout[ index ].value = Number( vout.value ) );
                     no_psbt_minus_fees.vin[ i ].witness = [ sig ];
                 }
 
@@ -695,27 +701,18 @@
                 });
 
                 //Before storing the user's unmatched offers, sign them with sighash_single | anyone_can_pay i.e. 3 | 128
-                console.log( 18, new_yes_psbts.length, new_no_psbts.length );
                 var i; for ( i=0; i<new_yes_psbts.length; i++ ) {
-                    var index = new_yes_psbts[ i ][ 1 ];
-                    var yes_scripts = [
-                        [ yes_pubkey, "OP_CHECKSIGVERIFY", aggeus_interface.coordinators_pubkey, "OP_CHECKSIG" ],
-                        [ "OP_RETURN", index ],
-                    ];
-                    var [ yes_contract, yes_tree ] = aggeus_interface.getAddressData( yes_scripts, 0 );
-                    var sig = tapscript.Signer.taproot.sign( yes_privkey, new_yes_psbts[ i ][ 0 ], 0, {sigflag: 3 | 128, extension: yes_tree[ 0 ]} ).hex;
-                    console.log( `i am changing my sig! old psbt: ${JSON.stringify( new_yes_psbts[ i ][ 0 ].vin[ 0 ] )} -- new sig: ${sig}`, new_yes_psbts );
+                    var sig = tapscript.Signer.taproot.sign( yes_privkey, new_yes_psbts[ i ][ 0 ], 0, {sigflag: 3 | 128}).hex;
+                    var sighash = tapscript.Signer.taproot.hash( new_yes_psbts[ i ][ 0 ], 0, {sigflag: 3 | 128 }).hex;
+                    new_yes_psbts[ i ][ 0 ].vin.forEach( ( vin, index ) => new_yes_psbts[ i ][ 0 ].vin[ index ].prevout.value = Number( vin.prevout.value ) );
+                    new_yes_psbts[ i ][ 0 ].vout.forEach( ( vout, index ) => new_yes_psbts[ i ][ 0 ].vout[ index ].value = Number( vout.value ) );
                     new_yes_psbts[ i ][ 0 ].vin[ 0 ].witness = [ sig ];
                 }
                 var i; for ( i=0; i<new_no_psbts.length; i++ ) {
-                    var index = new_no_psbts[ i ][ 1 ];
-                    var no_scripts = [
-                        [ no_pubkey, "OP_CHECKSIGVERIFY", aggeus_interface.coordinators_pubkey, "OP_CHECKSIG" ],
-                        [ "OP_RETURN", index ],
-                    ];
-                    var [ no_contract, no_tree ] = aggeus_interface.getAddressData( no_scripts, 0 );
-                    var sig = tapscript.Signer.taproot.sign( no_privkey, new_no_psbts[ i ][ 0 ], 0, {sigflag: 3 | 128, extension: no_tree[ 0 ]} ).hex;
-                    console.log( `i am changing my sig! old psbt: ${JSON.stringify( new_no_psbts[ i ][ 0 ].vin[ 0 ] )} -- new sig: ${sig}`, new_no_psbts );
+                    var sig = tapscript.Signer.taproot.sign( no_privkey, new_no_psbts[ i ][ 0 ], 0, {sigflag: 3 | 128, }).hex;
+                    var sighash = tapscript.Signer.taproot.hash( new_no_psbts[ i ][ 0 ], 0, {sigflag: 3 | 128 }).hex;
+                    new_no_psbts[ i ][ 0 ].vin.forEach( ( vin, index ) => new_no_psbts[ i ][ 0 ].vin[ index ].prevout.value = Number( vin.prevout.value ) );
+                    new_no_psbts[ i ][ 0 ].vout.forEach( ( vout, index ) => new_no_psbts[ i ][ 0 ].vout[ index ].value = Number( vout.value ) );
                     new_no_psbts[ i ][ 0 ].vin[ 0 ].witness = [ sig ];
                 }
 
@@ -827,25 +824,17 @@
                 //If the txid on the user's psbts changed, resign the psbts with sighash_single | anyone_can_pay i.e. 3 | 128
                 if ( new_txid !== old_txid ) {
                     var i; for ( i=0; i<new_yes_psbts.length; i++ ) {
-                        var index = new_yes_psbts[ i ][ 1 ];
-                        var yes_scripts = [
-                            [ yes_pubkey, "OP_CHECKSIGVERIFY", aggeus_interface.coordinators_pubkey, "OP_CHECKSIG" ],
-                            [ "OP_RETURN", index ],
-                        ];
-                        var [ yes_contract, yes_tree ] = aggeus_interface.getAddressData( yes_scripts, 0 );
-                        new_yes_psbts[ i ][ 0 ].vin[ 0 ].txid = new_txid;
-                        var sig = tapscript.Signer.taproot.sign( yes_privkey, new_yes_psbts[ i ][ 0 ], 0, {sigflag: 3 | 128, extension: yes_tree[ 0 ]} ).hex;
+                        var sig = tapscript.Signer.taproot.sign( yes_privkey, new_yes_psbts[ i ][ 0 ], 0, {sigflag: 3 | 128} ).hex;
+                        var sighash = tapscript.Signer.taproot.hash( new_yes_psbts[ i ][ 0 ], 0, {sigflag: 3 | 128 }).hex;
+                        new_yes_psbts[ i ][ 0 ].vin.forEach( ( vin, index ) => new_yes_psbts[ i ][ 0 ].vin[ index ].prevout.value = Number( vin.prevout.value ) );
+                        new_yes_psbts[ i ][ 0 ].vout.forEach( ( vout, index ) => new_yes_psbts[ i ][ 0 ].vout[ index ].value = Number( vout.value ) );
                         new_yes_psbts[ i ][ 0 ].vin[ 0 ].witness = [ sig ];
                     }
                     var i; for ( i=0; i<new_no_psbts.length; i++ ) {
-                        var index = new_no_psbts[ i ][ 1 ];
-                        var no_scripts = [
-                            [ no_pubkey, "OP_CHECKSIGVERIFY", aggeus_interface.coordinators_pubkey, "OP_CHECKSIG" ],
-                            [ "OP_RETURN", index ],
-                        ];
-                        var [ no_contract, no_tree ] = aggeus_interface.getAddressData( no_scripts, 0 );
-                        new_no_psbts[ i ][ 0 ].vin[ 0 ].txid = new_txid;
-                        var sig = tapscript.Signer.taproot.sign( no_privkey, new_no_psbts[ i ][ 0 ], 0, {sigflag: 3 | 128, extension: no_tree[ 0 ]} ).hex;
+                        var sig = tapscript.Signer.taproot.sign( no_privkey, new_no_psbts[ i ][ 0 ], 0, {sigflag: 3 | 128} ).hex;
+                        var sighash = tapscript.Signer.taproot.hash( new_no_psbts[ i ][ 0 ], 0, {sigflag: 3 | 128 }).hex;
+                        new_no_psbts[ i ][ 0 ].vin.forEach( ( vin, index ) => new_no_psbts[ i ][ 0 ].vin[ index ].prevout.value = Number( vin.prevout.value ) );
+                        new_no_psbts[ i ][ 0 ].vout.forEach( ( vout, index ) => new_no_psbts[ i ][ 0 ].vout[ index ].value = Number( vout.value ) );
                         new_no_psbts[ i ][ 0 ].vin[ 0 ].witness = [ sig ];
                     }
 
@@ -994,9 +983,18 @@
                             var market_id = json.msg_value.market_id;
                             var tx_to_work_with = json.msg_value.psbt;
                             var offers_accepted = json.msg_value.offer_ids;
+                            var real_inputs = [];
+                            offers_accepted.forEach( offer_id => {
+                                offer_id = offer_id[ 0 ];
+                                var offer = offers[ `${offer_id}_${market_id}` ];
+                                if ( offer.odds_per_yes_better ) var real_input_tx = tapscript.Tx.decode( offer.yes_psbt );
+                                else var real_input_tx = tapscript.Tx.decode( offer.no_psbt );
+                                real_inputs.push( real_input_tx.vin[ 0 ] );
+                            });
                             //If the user found matching offers, act as the coordinator to add an input to his tx that funds his contracts and pays the requisite fees
                             var sum_of_inputs = 0;
                             tx_to_work_with.vin.forEach( input => sum_of_inputs = sum_of_inputs + Number( input.prevout.value ) );
+                            real_inputs.forEach( ( input, index ) => tx_to_work_with.vin[ index ] = input );
                             var sum_of_outputs = 0;
                             tx_to_work_with.vout.forEach( output => sum_of_outputs = sum_of_outputs + Number( output.value ) );
                             var difference = sum_of_outputs - sum_of_inputs;
@@ -1039,10 +1037,9 @@
                                     scriptPubKey: tapscript.Address.toScriptPubKey( fee_address ),
                                 },
                             });
-                            var sig = tapscript.Signer.taproot.sign( fee_privkey, tx_to_work_with, tx_to_work_with.vin.length - 1 ).hex;
+                            var sig = tapscript.Signer.taproot.sign( fee_privkey, tx_to_work_with, tx_to_work_with.vin.length - 1, {sigflag: 1 | 128 }).hex;
                             tx_to_work_with.vin[ tx_to_work_with.vin.length - 1 ].witness = [ sig ];
-                            console.log( 'now broadcasting this psbt:' );
-                            console.log( tapscript.Tx.encode( tx_to_work_with ).hex );
+                            var sighash = tapscript.Signer.taproot.hash( tx_to_work_with, tx_to_work_with.vin.length - 1, {sigflag: 1 | 128 }).hex;
                             var txid = await mempool_client( network.split( "," ), "broadcast", tapscript.Tx.encode( tx_to_work_with ).hex );
                             var message = JSON.stringify({
                                 msg_type: "accept_offers_reply",
