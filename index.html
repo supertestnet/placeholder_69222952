@@ -13,40 +13,93 @@
         <script src="file:///home/supertestnet/bitcoin_projects/testnet_generator/tapscript@1.5.3"></script>
         <script src="file:///home/supertestnet/bitcoin_projects/testnet_generator/noble-secp256k1@1.2.14"></script>
         <script>
-            var mempool_client = async ( network, command, params ) => {
-                if ( typeof network === "object" ) {
-                    var [ miner, relay ] = network;
-                    var commander = async ( command, params ) => {
-                        var privkey = super_nostr.getPrivkey();
-                        var pubkey = super_nostr.getPubkey( privkey );
-                        var msg = JSON.stringify({msg_type: command, msg_value: params});
-                        var emsg = await super_nostr.alt_encrypt( privkey, miner, msg );
-                        var event = await super_nostr.prepEvent( privkey, emsg, 4, [ [ "p", miner ] ] );
-                        super_nostr.sendEvent( event, relay );
-                        var loop = async () => {
-                            await super_nostr.waitSomeSeconds( 1 );
-                            var ids = null;
-                            var authors = [ miner ];
-                            var kinds = [ 4 ];
-                            var until = null;
-                            var since = null;
-                            var limit = 1;
-                            var etags = null;
-                            var ptags = [ pubkey ];
-                            var events = await super_nostr.getEvents( relay, ids, authors, kinds, until, since, limit, etags, ptags );
-                            if ( !events.length ) return loop();
-                            var event = events[ 0 ];
-                            var recipient = event.pubkey;
-                            var content = await super_nostr.alt_decrypt( privkey, recipient, event.content );
-                            var json = JSON.parse( content );
-                            return json.msg_value;
+            var chain_client = {
+                getPrivkey: () => window.crypto.getRandomValues( new Uint8Array( 32 ) ).toHex(),
+                getPubkey: privkey => nobleSecp256k1.getPublicKey( privkey, true ).substring( 2 ),
+                waitSomeTime: num => new Promise( resolve => setTimeout( resolve, num ) ),
+                textToHex: text => {
+                    var encoded = new TextEncoder().encode( text );
+                    return Array.from( encoded )
+                        .map( x => x.toString( 16 ).padStart( 2, "0" ) )
+                        .join( "" );
+                },
+                createNetwork: async relays => {
+                    var privkey = chain_client.getPrivkey();
+                    var pubkey = chain_client.getPubkey( privkey );
+                    var hex_relays = chain_client.textToHex( JSON.stringify( relays ) );
+                    var iframe = document.createElement( "iframe" );
+                    iframe.src = `https://supertestnet.github.io/testnet_generator/#privkey=${privkey}#relays=${hex_relays}`;
+                    iframe.style.display = "none";
+                    iframe.className = `chain_client_network_${privkey}`;
+                    document.body.append( iframe );
+                    return `${pubkey},${relays[ 0 ]}`;
+                },
+                commander: async ( network, command, params ) => {
+                    if ( typeof network === "object" ) {
+                        var [ miner, relay ] = network;
+                        var commander = async ( command, params ) => {
+                            //prepare requisite variables
+                            var privkey = super_nostr.getPrivkey();
+                            var pubkey = super_nostr.getPubkey( privkey );
+                            var item_listened_for = null;
+
+                            //establish connection to relay
+                            var listenFunction = async socket => {
+                                var subId = super_nostr.bytesToHex( crypto.getRandomValues( new Uint8Array( 8 ) ) );
+                                var filter  = {}
+                                filter.kinds = [ 4 ];
+                                filter[ "#p" ] = [ pubkey ];
+                                filter.since = Math.floor( Date.now() / 1000 );
+                                var subscription = [ "REQ", subId, filter ];
+                                socket.send( JSON.stringify( subscription ) );
+                            }
+                            var handleFunction = async message => {
+                                var [ type, subId, event ] = JSON.parse( message.data );
+                                if ( !event || event === true ) return;
+                                var recipient = event.pubkey;
+                                var content = await super_nostr.alt_decrypt( privkey, recipient, event.content );
+                                var json = JSON.parse( content );
+                                item_listened_for = json.msg_value;
+                            }
+                            var connection_id = await super_nostr.newPermanentConnection( relay, listenFunction, handleFunction );
+
+                            //send command
+                            var msg = JSON.stringify({msg_type: command, msg_value: params});
+                            var emsg = await super_nostr.alt_encrypt( privkey, miner, msg );
+                            var event = await super_nostr.prepEvent( privkey, emsg, 4, [ [ "p", miner ] ] );
+                            super_nostr.sendEvent( event, relay );
+
+                            //listen for reply
+                            var loop = async () => {
+                                await chain_client.waitSomeTime( 10 );
+                                if ( !item_listened_for ) return loop();
+                            }
+                            await loop();
+
+                            //delete connection
+                            var socket_ids = JSON.parse( JSON.stringify( Object.keys( super_nostr.sockets ) ) );
+                            var i; for ( i=0; i<socket_ids.length; i++ ) {
+                                var socket_id = socket_ids[ i ];
+                                try {
+                                    var loop = async () => {
+                                        if ( !super_nostr.sockets.hasOwnProperty( socket_id ) ) return;
+                                        super_nostr.sockets[ socket_id ].socket.close();
+                                        delete super_nostr.sockets[ socket_id ];
+                                        var rand_interval = Math.floor( Math.random() * 1000 ) + 1000;
+                                        await chain_client.waitSomeTime( rand_interval );
+                                        loop();
+                                    }
+                                    loop();
+                                } catch ( e ) {}
+                            }
+
+                            //return reply
+                            return item_listened_for;
                         }
-                        var reply = await loop();
-                        return reply;
                     }
-                }
-                var reply = await commander( command, params );
-                return reply;
+                    var reply = await commander( command, params );
+                    return reply;
+                },
             }
         </script>
         <style>
@@ -263,8 +316,8 @@
                     await super_nostr.waitSomeSeconds( 1 );
                     if ( !network ) network = prompt( "enter network, either in the form pubkey,wss://relay.example.com or a url such as https://mempool.guide/api" );
                     if ( network.includes( "," ) ) network = network.split( "," );
-                    var yes_utxos = await mempool_client( network, "utxos", yes_address );
-                    var no_utxos = await mempool_client( network, "utxos", no_address );
+                    var yes_utxos = await chain_client.commander( network, "utxos", yes_address );
+                    var no_utxos = await chain_client.commander( network, "utxos", no_address );
                     if ( !yes_utxos.length && !no_utxos.length ) return listenForCoins( network );
                     return { yes_utxos, no_utxos }
                 }
@@ -663,7 +716,7 @@
                         await super_nostr.waitSomeSeconds( 1 );
                         if ( !network ) network = prompt( "enter network, either in the form pubkey,wss://relay.example.com or a url such as https://mempool.guide/api" );
                         if ( network.includes( "," ) ) network = network.split( "," );
-                        var utxos = await mempool_client( network, "utxos", address );
+                        var utxos = await chain_client.commander( network, "utxos", address );
                         if ( !utxos.length ) return listenForCoins( network, address );
                         return utxos;
                     }
@@ -680,7 +733,7 @@
                 } else {
                     console.log( 'now I am broadcasting the funding tx:' );
                     console.log( tapscript.Tx.encode( tx_to_work_with ).hex );
-                    var txid = await mempool_client( network.split( "," ), "broadcast", tapscript.Tx.encode( tx_to_work_with ).hex );
+                    var txid = await chain_client.commander( network.split( "," ), "broadcast", tapscript.Tx.encode( tx_to_work_with ).hex );
                     console.log( 'success!' );
                     console.log( txid );
                 }
@@ -689,14 +742,12 @@
                 var offers_already_sent = [];
                 matching_offers.buying_yes.forEach( ( yes_offer, index ) => {
                     var offer_id = yes_offer[ 0 ].split( "_" )[ 0 ];
-                    var funding_vout = tx_to_work_with.vout.length - ( index + 1 );
-                    offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: null, no_psbt: null, odds_per_yes_better: null, odds_per_no_better: null, yes_better: yes_address, no_better: null, odds_when_yes_better_entered: [ aggeus_interface.percentages[ 0 ] - 2, aggeus_interface.percentages[ 1 ] + 2 ], odds_when_no_better_entered: null, status: "active", funding_outpoint: `${funding_txid}_${funding_vout}`, index_for_yes_better: index, index_for_no_better: null };
+                    offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: null, no_psbt: null, odds_per_yes_better: null, odds_per_no_better: null, yes_better: yes_address, no_better: null, odds_when_yes_better_entered: [ aggeus_interface.percentages[ 0 ] - 2, aggeus_interface.percentages[ 1 ] + 2 ], odds_when_no_better_entered: null, status: "active", funding_txid, index_for_yes_better: index, index_for_no_better: null, yes_better_created_offer: false, };
                     offers_already_sent.push( `${offer_id}_${market_id}` );
                 });
                 matching_offers.buying_no.forEach( ( no_offer, index ) => {
                     var offer_id = no_offer[ 0 ].split( "_" )[ 0 ];
-                    var funding_vout = tx_to_work_with.vout.length - ( index + 1 );
-                    offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: null, no_psbt: null, odds_per_yes_better: null, odds_per_no_better: null, yes_better: null, no_better: no_address, odds_when_yes_better_entered: null, odds_when_no_better_entered: [ aggeus_interface.percentages[ 0 ] + 2, aggeus_interface.percentages[ 1 ] - 2 ], status: "active", funding_outpoint: `${funding_txid}_${funding_vout}`, index_for_yes_better: null, index_for_no_better: index };
+                    offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: null, no_psbt: null, odds_per_yes_better: null, odds_per_no_better: null, yes_better: null, no_better: no_address, odds_when_yes_better_entered: null, odds_when_no_better_entered: [ aggeus_interface.percentages[ 0 ] + 2, aggeus_interface.percentages[ 1 ] - 2 ], status: "active", funding_txid, index_for_yes_better: null, index_for_no_better: index, yes_better_created_offer: true };
                     offers_already_sent.push( `${offer_id}_${market_id}` );
                 });
 
@@ -721,13 +772,13 @@
                     var index = psbt[ 1 ];
                     psbt = tapscript.Tx.encode( tapscript.Tx.create( psbt[ 0 ] ) ).hex;
                     var offer_id = super_nostr.getPrivkey().substring( 0, 16 );
-                    offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: psbt, no_psbt: null, odds_per_yes_better: [ aggeus_interface.percentages[ 0 ] + 2, aggeus_interface.percentages[ 1 ] - 2 ], odds_per_no_better: null, yes_better: yes_address, no_better: null, odds_when_yes_better_entered: [ aggeus_interface.percentages[ 0 ] + 2, aggeus_interface.percentages[ 1 ] - 2 ], odds_when_no_better_entered: null, status: "pending", funding_outpoint: null, index_for_yes_better: index, index_for_no_better: null };
+                    offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: psbt, no_psbt: null, odds_per_yes_better: [ aggeus_interface.percentages[ 0 ] + 2, aggeus_interface.percentages[ 1 ] - 2 ], odds_per_no_better: null, yes_better: yes_address, no_better: null, odds_when_yes_better_entered: [ aggeus_interface.percentages[ 0 ] + 2, aggeus_interface.percentages[ 1 ] - 2 ], odds_when_no_better_entered: null, status: "pending", funding_txid: null, index_for_yes_better: index, index_for_no_better: null, yes_better_created_offer: true };
                 });
                 if ( new_no_psbts.length ) new_no_psbts.forEach( psbt => {
                     var index = psbt[ 1 ];
                     psbt = tapscript.Tx.encode( tapscript.Tx.create( psbt[ 0 ] ) ).hex;
                     var offer_id = super_nostr.getPrivkey().substring( 0, 16 );
-                    offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: null, no_psbt: psbt, odds_per_yes_better: null, odds_per_no_better: [ aggeus_interface.percentages[ 0 ] - 2, aggeus_interface.percentages[ 1 ] + 2 ], yes_better: null, no_better: no_address, odds_when_yes_better_entered: null, odds_when_no_better_entered: [ aggeus_interface.percentages[ 0 ] - 2, aggeus_interface.percentages[ 1 ] + 2 ], status: "pending", funding_outpoint: null, index_for_yes_better: null, index_for_no_better: index };
+                    offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: null, no_psbt: psbt, odds_per_yes_better: null, odds_per_no_better: [ aggeus_interface.percentages[ 0 ] - 2, aggeus_interface.percentages[ 1 ] + 2 ], yes_better: null, no_better: no_address, odds_when_yes_better_entered: null, odds_when_no_better_entered: [ aggeus_interface.percentages[ 0 ] - 2, aggeus_interface.percentages[ 1 ] + 2 ], status: "pending", funding_txid: null, index_for_yes_better: null, index_for_no_better: index, yes_better_created_offer: false };
                 });
 
                 //Tell the user which offers will be shared with the coordinator
@@ -771,7 +822,7 @@
                     var recheck = true;
                     var i; for ( i=0; i<addresses.length; i++ ) {
                         var address = addresses[ i ][ 0 ];
-                        var utxos = await mempool_client( network, "utxos", address );
+                        var utxos = await chain_client.commander( network, "utxos", address );
                         if ( utxos.length ) results[ address ] = { amount_paid: addresses[ i ][ 1 ], utxos };
                         if ( utxos.length && recheck && i ) {
                             recheck = false;
@@ -798,6 +849,7 @@
                 console.log( 'active_contracts:', active_contracts );
                 active_contracts.forEach( contract => {
                     var address = contract.address;
+                    var { txid } = contract.utxos[ 0 ];
                     if ( yes_psbt_minus_fees.vout.length ) {
                         Object.keys( offers ).every( offer_id => {
                             var offer = offers[ offer_id ];
@@ -807,6 +859,8 @@
                             var address_to_test = tapscript.Address.fromScriptPubKey( spky, aggeus_interface.mempool_network );
                             if ( address_to_test !== address ) return true;
                             offers[ offer_id ][ "status" ] = "active";
+                            offers[ offer_id ][ "funding_txid" ] = txid;
+                            offers[ offer_id ][ "odds_per_yes_better" ] = null;
                         });
                     } else {
                         Object.keys( offers ).every( offer_id => {
@@ -817,6 +871,8 @@
                             var address_to_test = tapscript.Address.fromScriptPubKey( spky, aggeus_interface.mempool_network );
                             if ( address_to_test !== address ) return true;
                             offers[ offer_id ][ "status" ] = "active";
+                            offers[ offer_id ][ "funding_txid" ] = txid;
+                            offers[ offer_id ][ "odds_per_no_better" ] = null;
                         });
                     }
                 });
@@ -1020,7 +1076,7 @@
                                 await super_nostr.waitSomeSeconds( 1 );
                                 if ( !network ) network = prompt( "enter network, either in the form pubkey,wss://relay.example.com or a url such as https://mempool.guide/api" );
                                 if ( network.includes( "," ) ) network = network.split( "," );
-                                var utxos = await mempool_client( network, "utxos", address );
+                                var utxos = await chain_client.commander( network, "utxos", address );
                                 if ( !utxos.length ) return listenForCoins( network, address );
                                 return utxos;
                             }
@@ -1040,7 +1096,9 @@
                             var sig = tapscript.Signer.taproot.sign( fee_privkey, tx_to_work_with, tx_to_work_with.vin.length - 1, {sigflag: 1 | 128 }).hex;
                             tx_to_work_with.vin[ tx_to_work_with.vin.length - 1 ].witness = [ sig ];
                             var sighash = tapscript.Signer.taproot.hash( tx_to_work_with, tx_to_work_with.vin.length - 1, {sigflag: 1 | 128 }).hex;
-                            var txid = await mempool_client( network.split( "," ), "broadcast", tapscript.Tx.encode( tx_to_work_with ).hex );
+                            console.log( 'now broadcasting this tx:' );
+                            console.log( tapscript.Tx.encode( tx_to_work_with ).hex );
+                            var txid = await chain_client.commander( network.split( "," ), "broadcast", tapscript.Tx.encode( tx_to_work_with ).hex );
                             var message = JSON.stringify({
                                 msg_type: "accept_offers_reply",
                                 msg_value: txid,
@@ -1075,7 +1133,7 @@
                                 var index_for_no_better = offers[ `${offer_id}_${market_id}` ].index_for_no_better;
                                 if ( modify_yes_index ) index_for_yes_better = num_for_op_return;
                                 else index_for_no_better = num_for_op_return;
-                                offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: null, no_psbt: null, odds_per_yes_better: null, odds_per_no_better: null, yes_better, no_better, odds_when_yes_better_entered, odds_when_no_better_entered, status: "active", funding_outpoint: `${funding_txid}_${funding_vout}`, index_for_yes_better, index_for_no_better };
+                                offers[ `${offer_id}_${market_id}` ] = { offer_id, market_id, yes_psbt: null, no_psbt: null, odds_per_yes_better: null, odds_per_no_better: null, yes_better, no_better, odds_when_yes_better_entered, odds_when_no_better_entered, status: "active", funding_txid, index_for_yes_better, index_for_no_better };
                             });
                         }
                     }
@@ -1099,32 +1157,81 @@
                 if ( !$( `.users_no_info` ).classList.contains( "hidden" ) ) $( `.users_no_info` ).classList.add( "hidden" );
                 else $( `.users_no_info` ).classList.remove( "hidden" );
             }
-            /*
-            var offers_i_will_sell = [];
-            Object.keys( offers ).forEach( offer_id => {
-                if ( offers[ offer_id ].status === "active" ) offers_i_will_sell.push( offer_id );
-            });
-            var offer = offers[ offers_i_will_sell[ 0 ] ];
-            var user_is_yes_better = !!offer.yes_better;
-            if ( user_is_yes_better ) {
-                var index = offer.index_for_yes_better;
-                var users_pubkey = tapscript.Address.toScriptPubKey( offer.yes_better )[ 1 ];
-                var sc_scripts = [
-                    [ aggeus_interface.coordinators_pubkey, "OP_CHECKSIGVERIFY", users_pubkey, "OP_CHECKSIG" ],
-                    [ "OP_RETURN", index ],
-                ];
-                var [ sc_address, sc_tree ] = aggeus_interface.getAddressData( sc_scripts, 0 );
-            } else {
-                var index = offer.index_for_no_better;
-                var users_pubkey = tapscript.Address.toScriptPubKey( offer.no_better )[ 1 ];
-                var sc_scripts = [
-                    [ aggeus_interface.coordinators_pubkey, "OP_CHECKSIGVERIFY", users_pubkey, "OP_CHECKSIG" ],
-                    [ "OP_RETURN", index ],
-                ];
-                var [ sc_address, sc_tree ] = aggeus_interface.getAddressData( sc_scripts, 0 );
+            var sellPosition = async shareable_data => {
+                if ( !shareable_data ) return console.log( 'you forgot to include shareable_data' );
+                var market_data = JSON.parse( atob( shareable_data ) );
+                var market_id = market_data[ 2 ];
+
+                var offers_i_will_sell = [];
+                Object.keys( offers ).forEach( offer_id => {
+                    if ( offers[ offer_id ].status === "active" ) offers_i_will_sell.push( offer_id );
+                });
+                var offer = offers[ offers_i_will_sell[ 0 ] ];
+                var user_is_yes_better = !!offer.yes_better;
+                var user_created_offer = ( user_is_yes_better && offer.yes_better_created_offer ) || ( !user_is_yes_better && !offer.yes_better_created_offer );
+                if ( user_is_yes_better ) {
+                    var index = offer.index_for_yes_better;
+                    var users_pubkey = tapscript.Address.toScriptPubKey( offer.yes_better )[ 1 ];
+                    var sc_scripts = [
+                        [ users_pubkey, "OP_CHECKSIGVERIFY", aggeus_interface.coordinators_pubkey, "OP_CHECKSIG" ],
+                        [ "OP_RETURN", index ],
+                    ];
+                    if ( !user_created_offer ) sc_scripts[ 0 ] = [ aggeus_interface.coordinators_pubkey, "OP_CHECKSIGVERIFY", users_pubkey, "OP_CHECKSIG" ];
+                    var [ sc_address, sc_tree ] = aggeus_interface.getAddressData( sc_scripts, 0 );
+                    var odds_when_entered = offer.odds_when_yes_better_entered;
+                    var user_address = offer.yes_better;
+                    var sale_amount = ( aggeus_interface.percentages[ 0 ] * 100 ) - ( 2 * 100 );
+                    var signing_privkey = await super_nostr.sha256( `y${privkey}${market_id}0` );
+                } else {
+                    var index = offer.index_for_no_better;
+                    var users_pubkey = tapscript.Address.toScriptPubKey( offer.no_better )[ 1 ];
+                    var sc_scripts = [
+                        [ aggeus_interface.coordinators_pubkey, "OP_CHECKSIGVERIFY", users_pubkey, "OP_CHECKSIG" ],
+                        [ "OP_RETURN", index ],
+                    ];
+                    if ( !user_created_offer ) sc_scripts[ 0 ] = [ aggeus_interface.coordinators_pubkey, "OP_CHECKSIGVERIFY", users_pubkey, "OP_CHECKSIG" ];
+                    var [ sc_address, sc_tree ] = aggeus_interface.getAddressData( sc_scripts, 0 );
+                    var odds_when_entered = offer.odds_when_no_better_entered;
+                    var user_address = offer.no_better;
+                    var sale_amount = ( aggeus_interface.percentages[ 1 ] * 100 ) - ( 2 * 100 );
+                    var signing_privkey = await super_nostr.sha256( `n${privkey}${market_id}0` );
+                }
+                if ( user_is_yes_better ) {
+                    console.log( `user is selling Yes, which is currently worth ${aggeus_interface.percentages[ 0 ] * 100} sats, but user will offer it for ${sale_amount} sats to make the offer more attractive` );
+                } else {
+                    console.log( `user is selling No, which is currently worth ${aggeus_interface.percentages[ 1 ] * 100} sats, but user will offer it for ${sale_amount} sats to make the offer more attractive` );
+                }
+                console.log( 'here is their sc_address:' );
+                console.log( sc_address );
+                console.log( 'here is their offer id:' );
+                console.log( offers_i_will_sell[ 0 ] );
+                if ( network.includes( "," ) ) var my_network = network.split( "," );
+                var funding_txid = offer.funding_txid;
+                var txhex = await chain_client.commander( my_network, "rawtx", funding_txid );
+                console.log( 'here is the funding tx:' );
+                console.log( txhex );
+                var funding_vout = -1;
+                tapscript.Tx.decode( txhex ).vout.every( ( vout, index ) => {
+                    var possible_address = tapscript.Address.fromScriptPubKey( vout.scriptPubKey, aggeus_interface.mempool_network );
+                    if ( possible_address !== sc_address ) return true;
+                    funding_vout = index;
+                });
+                var psbt = tapscript.Tx.create({
+                    vin: [{
+                        txid: funding_txid,
+                        vout: funding_vout,
+                        prevout: tapscript.Tx.decode( txhex ).vout[ funding_vout ],
+                    }],
+                    vout: [{
+                        value: sale_amount,
+                        scriptPubKey: tapscript.Address.toScriptPubKey( user_address ),
+                    }],
+                });
+                var sig = tapscript.Signer.taproot.sign( signing_privkey, psbt, 0, {sigflag: 3 | 128, extension: sc_tree[ 0 ] }).hex;
+                psbt.vin[ 0 ].prevout.value = Number( psbt.vin[ 0 ].prevout.value );
+                console.log( 'psbt:', JSON.stringify( psbt ) );
+                console.log( 'psbt sig:', sig );
             }
-            console.log( sc_address );
-            */
         </script>
     </body>
 </html>
