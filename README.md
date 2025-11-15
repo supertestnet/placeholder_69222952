@@ -17,7 +17,7 @@ If any matches are found, the coordinator acts as a proxy for those two users. F
 
 If the new user deposits more money than is available from the other side, then after matchmaking as much as possible, the remaining money from the new user becomes a set of new offers based on the current outcome percentages.
 
-For all users, the Yes and No boxes have a "Your Info" button which, if clicked, displays info about their offers; namely, how much they deposited and at what outcome percentages, how much they are expected to earn on resolution day if their side wins, and how much they might earn if they try to sell their position right now (though with a reminder that it's not guaranteed that anyone will take their offers right now). I also have fields for showing the difference between the amount of money they've deposited that is now sitting in "offers that are waiting for a counterparty" and the amount in "offers that already have a counterparty," though I do not yet update those fields when their contracts become active.
+For all users, the Yes and No boxes have a "Your Info" button which, if clicked, displays info about their offers; namely, how much they deposited and at what outcome percentages, how much they are expected to earn on resolution day if their side wins, and how much they might earn if they try to sell their position right now (though with a reminder that it's not guaranteed that anyone will take their offers right now). I also have fields for showing the difference between the amount of money they've deposited that is now sitting in "offers that are waiting for a counterparty" and the amount in "offers that already have a counterparty."
 
 ## Next steps
 
