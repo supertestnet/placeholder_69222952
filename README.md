@@ -1,9 +1,7 @@
 # Aggeus Interface
 An attempt to create a polymarket-like interface using my Aggeus protocol as a backend
 
-=================
-Recent progress
-=================
+## Recent progress
 
 I made it so a user can click on a market and make a deposit. I divide up their deposit into offers of 10k sats each, and anything remaining that is less than 10k sats just stays in their wallet as change. 
 
@@ -21,9 +19,7 @@ If the new user deposits more money than is available from the other side, then 
 
 For all users, the Yes and No boxes have a "Your Info" button which, if clicked, displays info about their offers; namely, how much they deposited and at what outcome percentages, how much they are expected to earn on resolution day if their side wins, and how much they might earn if they try to sell their position right now (though with a reminder that it's not guaranteed that anyone will take their offers right now). I also have fields for showing the difference between the amount of money they've deposited that is now sitting in "offers that are waiting for a counterparty" and the amount in "offers that already have a counterparty," though I do not yet update those fields when their contracts become active.
 
-=================
-Next steps
-=================
+## Next steps
 
 Implement support for selling a position
 
@@ -41,9 +37,7 @@ In the coordinator's create_offers command, validate the user submitted data bef
 
 Ensure all parties verify that any presigned transactions they trust only spend confirmed taproot utxos
 
-=================
-Done
-=================
+## Done
 
 Ensure that when someone creates new offers, the coordinator learns about them via the api -- right now he only updates them if the user is *running* the coordinator -- I will probably need a new "create_offers" method for this [done]
 
