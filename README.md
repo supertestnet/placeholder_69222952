@@ -21,9 +21,9 @@ For all users, the Yes and No boxes have a "Your Info" button which, if clicked,
 
 ## Next steps
 
-Implement support for selling a position
+Implement support for selling a position -- to that end, I have a method called sellPosition which does the job pretty well, except it does not modify the user interface yet. And I'm not exactly sure *how* to modify the user interface. Selling your position is a bit complicated: you list all your shares for sale, and if someone buys at least one of them, it presents a success message in the browser console, otherwise it just hangs forever. But there are two problems with this: first, if I modify the user interface accordingly, users could get confused if one of their shares gets bought but not all; second, if the market shifts significantly, the user's sale price might become outdated, so it should probably get modified, but if I ask for user input, it's a lot more interaction than I want, and if I do it automatically, it could result in their sale price automatically reducing to an amount where the user loses money.
 
-In service of that, consider this: John paid 3800 sats for his position because Kelly listed it for sale as if the odds were at 62%/38% instead of 60%/40%, to make her offer more attractive. If John relists the contract when the odds are at 20%/80%, he should actually list it for sale as if the odds were at 22%/78%, to make his offer more attractive, and thus expect to gross 7800 sats, for a net gain of 7800 - 3800 = 4000 sats. So he needs to make a psbt where the coordinator can take the money in the smart contract as long as he pays John 7800 sats.
+I suppose the latter is only an issue if they are making a profit when they list their shares for sale (otherwise, they probably won't mind their sale price automatically increasing in value til they *are* making a profit), and in that case, if their sale price would change to a value where they are losing money, I can prompt them for input before so modifying it. So that modification would probably sufficiently fix the second consideration. As for the first one, I guess I can just display how many shares the user has and which ones got sold. That should fix the first issue, and now I know what to do, so I can go do it!
 
 Implement support for settling contracts on resolution day
 
@@ -46,3 +46,9 @@ Update the fields telling users how much money they can withdraw [done]
 Ensure a user's stored offers change from pending to active once they become active [done]
 
 Ensure the psbt which the coordinator tries to broadcast has valid signatures for all of its inputs [done]
+
+Figure out why John's contracts all display as "active" once he purchases Kelly's contracts, and fix it [done]
+
+Figure out why this happens, and fix it: when John purchases two offers from Kelly and has enough extra to create two offers of his own, one of his "pending" psbts ends up empty -- no inputs, no outputs [done]
+
+Figure out why this happens, and fix it: if Tommy deposits 10k sats when the odds are 20%-80%, and John had two "No" offers for sale at 22%-78%, Tommy buys one offer for 7800 sats and pays 0 in tx fees, but it says he can only withdraw 2000 sats unilaterally instead of 2200 [done]
